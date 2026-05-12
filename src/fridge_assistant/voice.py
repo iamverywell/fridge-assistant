@@ -7,7 +7,7 @@ def load_model():
     global model
     if model is None:
         print("正在加载语音模型...")
-        model = whisper.load_model("base")
+        model = whisper.load_model("tiny")
     return model
 
 def transcribe_audio(audio_path: str) -> str:
