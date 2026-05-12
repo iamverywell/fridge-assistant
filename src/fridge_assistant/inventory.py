@@ -59,6 +59,19 @@ def remove_item(access_token: str, item_id: str) -> None:
     client = _authed_client(access_token)
     client.table("inventory").delete().eq("id", item_id).execute()
 
+def update_item(access_token: str, item_id: str,
+                name: str, quantity: float, unit: str,
+                expiry_date: str = None) -> None:
+    """更新食材信息"""
+    client = _authed_client(access_token)
+    client.table("inventory").update({
+        "name": name.strip(),
+        "quantity": quantity,
+        "unit": unit,
+        "expiry": expiry_date or "未知",
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("id", item_id).execute()
+
 def use_item(access_token: str, item_id: str,
              quantity: float, current_quantity: float, unit: str) -> None:
     """使用食材，扣减库存；用完自动删除"""

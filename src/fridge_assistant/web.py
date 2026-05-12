@@ -1,10 +1,11 @@
 import streamlit as st
 import tempfile
 import os
+from datetime import date
 from fridge_assistant.inventory import (
     sign_up, sign_in, sign_out,
     load_inventory, add_item, remove_item,
-    use_item, get_expiring_soon,
+    use_item, update_item, get_expiring_soon,
 )
 from fridge_assistant.app import suggest_recipes, analyze_nutrition, generate_shopping_list, parse_voice_text
 from fridge_assistant.vision import analyze_image, parse_items
@@ -85,21 +86,47 @@ def show_main_app():
             inventory = load_inventory(token)
             expiring_ids = {i["id"] for i in get_expiring_soon(token)}
             if inventory:
+                UNITS = ["个", "克", "毫升", "盒", "斤", "袋", "根", "片"]
                 for item in inventory:
-                    c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
-                    warning = "⚠️" if item["id"] in expiring_ids else ""
-                    c1.write(f"**{item['name']}** {warning}")
-                    c2.write(f"{item['quantity']}{item['unit']} （{item['expiry']}）")
-                    # 使用
-                    use_qty = c3.number_input("用", min_value=0.1,
-                                              value=1.0, step=0.1,
-                                              key=f"use_{item['id']}")
-                    if c3.button("✓", key=f"usebtn_{item['id']}"):
-                        use_item(token, item["id"], use_qty, item["quantity"], item["unit"])
-                        st.rerun()
-                    if c4.button("删除", key=f"del_{item['id']}"):
-                        remove_item(token, item["id"])
-                        st.rerun()
+                    item_id = item["id"]
+                    editing = st.session_state.get("editing_id") == item_id
+                    if not editing:
+                        c1, c2, c3, c4, c5 = st.columns([3, 2, 1, 1, 1])
+                        warning = "⚠️" if item_id in expiring_ids else ""
+                        c1.write(f"**{item['name']}** {warning}")
+                        c2.write(f"{item['quantity']}{item['unit']} （{item['expiry']}）")
+                        use_qty = c3.number_input("用", min_value=0.1, value=1.0, step=0.1, key=f"use_{item_id}")
+                        if c3.button("✓", key=f"usebtn_{item_id}"):
+                            use_item(token, item_id, use_qty, item["quantity"], item["unit"])
+                            st.rerun()
+                        if c4.button("编辑", key=f"edit_{item_id}"):
+                            st.session_state["editing_id"] = item_id
+                            st.rerun()
+                        if c5.button("删除", key=f"del_{item_id}"):
+                            remove_item(token, item_id)
+                            st.rerun()
+                    else:
+                        with st.form(key=f"form_{item_id}"):
+                            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                            new_name = c1.text_input("名称", value=item["name"])
+                            new_qty = c2.number_input("数量", value=float(item["quantity"]), min_value=0.1, step=0.1)
+                            unit_idx = UNITS.index(item["unit"]) if item["unit"] in UNITS else 0
+                            new_unit = c3.selectbox("单位", UNITS, index=unit_idx)
+                            try:
+                                expiry_default = date.fromisoformat(item["expiry"])
+                            except (ValueError, TypeError):
+                                expiry_default = date.today()
+                            new_expiry = c4.date_input("过期日期", value=expiry_default)
+                            col_save, col_cancel = st.columns(2)
+                            saved = col_save.form_submit_button("保存 ✓", use_container_width=True)
+                            cancelled = col_cancel.form_submit_button("取消", use_container_width=True)
+                        if saved:
+                            update_item(token, item_id, new_name, new_qty, new_unit, str(new_expiry))
+                            del st.session_state["editing_id"]
+                            st.rerun()
+                        if cancelled:
+                            del st.session_state["editing_id"]
+                            st.rerun()
             else:
                 st.info("冰箱是空的！")
 
@@ -143,8 +170,11 @@ def show_main_app():
                 items[i]["name"] = c1.text_input("名称", item["name"], key=f"name_{i}")
                 items[i]["quantity"] = c2.number_input("数量", value=item["quantity"], key=f"qty_{i}")
                 items[i]["unit"] = c3.selectbox("单位", ["个", "克", "毫升", "盒", "斤"], key=f"unit_{i}")
-                expiry = c4.date_input("过期日期", key=f"exp_{i}")
-                items[i]["expiry"] = str(expiry)
+                try:
+                    exp_default = date.fromisoformat(item.get("expiry") or "")
+                except (ValueError, TypeError):
+                    exp_default = date.today()
+                items[i]["expiry"] = str(c4.date_input("过期日期", value=exp_default, key=f"exp_{i}"))
             if st.button("全部加入库存", use_container_width=True):
                 for item in items:
                     add_item(token, user_id, item["name"], item["quantity"],
@@ -183,7 +213,11 @@ def show_main_app():
                 items[i]["name"] = c1.text_input("名称", item["name"], key=f"vname_{i}")
                 items[i]["quantity"] = c2.number_input("数量", value=float(item["quantity"]), key=f"vqty_{i}")
                 items[i]["unit"] = c3.selectbox("单位", ["个", "克", "毫升", "盒", "斤", "袋"], key=f"vunit_{i}")
-                items[i]["expiry"] = c4.text_input("过期日期", item.get("expiry") or "", key=f"vexp_{i}")
+                try:
+                    vexp_default = date.fromisoformat(item.get("expiry") or "")
+                except (ValueError, TypeError):
+                    vexp_default = date.today()
+                items[i]["expiry"] = str(c4.date_input("过期日期", value=vexp_default, key=f"vexp_{i}"))
             if st.button("全部加入库存 ✅", use_container_width=True, key="voice_add"):
                 for item in items:
                     add_item(token, user_id, item["name"], item["quantity"],
